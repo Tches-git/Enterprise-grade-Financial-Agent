@@ -188,10 +188,12 @@ def create_api_app() -> FastAPI:
     from enterprise.auth.routes import router as enterprise_auth_router
     from enterprise.tenant.routes import router as enterprise_tenant_router
     from enterprise.approval.routes import router as enterprise_approval_router
+    from enterprise.audit.routes import router as enterprise_audit_router
 
     fastapi_app.include_router(enterprise_auth_router, prefix="/api/v1")
     fastapi_app.include_router(enterprise_tenant_router, prefix="/api/v1")
     fastapi_app.include_router(enterprise_approval_router, prefix="/api/v1")
+    fastapi_app.include_router(enterprise_audit_router, prefix="/api/v1")
 
     # local dev endpoints
     if settings.ENV == "local":
