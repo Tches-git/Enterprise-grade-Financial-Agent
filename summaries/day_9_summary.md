@@ -1,0 +1,61 @@
+# Day 9 — LLM 三层容错与任务状态机
+
+## 今日改动
+
+完成 LLM 调用的三层容错体系、企业级任务状态机扩展和基于页面复杂度的模型路由，核心工作分四部分：
+
+1. **企业任务状态机**：`enterprise/llm/task_states.py` 在 Skyvern 原有 8 个状态基础上扩展了 3 个企业级状态——`PENDING_APPROVAL`（等待审批）、`NEEDS_HUMAN`（AI 无法处理）、`PAUSED`（手动暂停）。定义了完整的状态转换矩阵（VALID_TRANSITIONS），包含 22 条合法转换路径，终态集合和需要人工关注的状态集合。`validate_transition()` 函数在状态变更前执行合法性校验，非法转换抛出 `InvalidTransitionError`
+2. **三层 LLM 容错调用器**：`enterprise/llm/resilient_caller.py` 实现了三层防护——Layer 1 通过 `build_structured_prompt()` 在系统提示词中嵌入 JSON Schema 约束和输出格式要求；Layer 2 通过 `parse_and_validate()` 执行 Markdown 代码块清理 + JSON 解析 + Pydantic 模型校验；`call_llm_with_retry()` 将两层组合并附加指数退避重试（1s/2s/4s，最多 3 次）。Layer 3 在全部重试耗尽后将 `needs_human` 标记为 True，通知任务层转入 NEEDS_HUMAN 状态
+3. **页面复杂度模型路由**：`enterprise/llm/model_router.py` 基于 5 个 DOM 特征（元素数量、iframe 嵌套深度、动态内容、Shadow DOM、表单字段数）评估页面复杂度为 SIMPLE/MODERATE/COMPLEX 三级，对应路由到 LIGHT/STANDARD/HEAVY 三个模型层级。路由决策包含完整的推理记录（reason 字段），支持日志审计
+4. **NEEDS_HUMAN 人工处置**：`enterprise/llm/human_intervention.py` 定义了 `StuckTaskInfo`（卡住位置、截图、LLM 错误日志、原始响应）和三种处置方式——跳过当前步骤（SKIP_STEP）、手动完成当前步骤（MANUAL_COMPLETE）、终止任务（TERMINATE）。`resolve_stuck_task()` 函数处理人工决策并返回任务的新状态和恢复指令
+
+新增测试 60 个（Day 9），累计 405 个，全部通过。
+
+## 设计决策
+
+### 三层容错的分层理念
+
+每层解决不同类型的故障，层层递进：
+
+- **Layer 1（Prompt 层）**：解决"LLM 不知道要输出什么格式"的问题。通过在系统提示词中嵌入完整的 JSON Schema，大多数主流 LLM 能够直接输出符合格式的 JSON。这一层的成功率通常在 85%-95%
+- **Layer 2（解析层）**：解决"LLM 知道格式但输出不完美"的问题。常见情况包括：输出被 Markdown 代码块包裹（`\`\`\`json ... \`\`\``）、多余的换行或空白、个别字段缺失。Markdown 清理 + Pydantic 严格校验覆盖了这些情况
+- **Layer 3（任务层）**：解决"LLM 确实无法处理"的问题。某些页面过于复杂或异常，连续 3 次重试后仍然失败。此时不是让任务崩溃，而是优雅降级到 NEEDS_HUMAN 状态
+
+### 指数退避的时间选择
+
+重试延迟序列为 1s → 2s → 4s（总等待 7s），而非固定间隔或更长的延迟：
+
+- LLM 的大多数失败是瞬态的（网络波动、负载均衡切换），1-4 秒的间隔足以跨越这类窗口
+- RPA 场景下，用户（审批人或操作员）正在等待结果，总等待时间不宜超过 10 秒
+- 指数增长而非固定间隔，给 LLM 服务更多的恢复时间窗口
+
+### 模型路由的阈值设定
+
+复杂度阈值基于实际金融系统的页面特征统计：
+
+- **SIMPLE（< 100 元素）**：网银登录页、余额查询页等简单页面。这类页面结构清晰，轻量模型（如 Claude Haiku）即可准确解析
+- **MODERATE（100-500 元素）**：转账表单、保单详情页等中等复杂页面。需要标准模型（如 Claude Sonnet）来理解表单字段关系和业务逻辑
+- **COMPLEX（> 500 元素 或 深层 iframe / Shadow DOM）**：银行企业网银的批量转账页面、保险核心系统的多 tab 录入界面等。这类页面通常包含嵌套 iframe、动态加载内容、Shadow DOM 组件，需要大模型（如 Claude Opus）来处理
+
+### NEEDS_HUMAN 的三种处置方式
+
+设计了三种处置方式而非仅"重试/终止"二选一，因为金融场景下人工介入的粒度需要更细：
+
+- **跳过**：某些步骤不影响核心业务逻辑（如关闭弹窗广告），AI 无法处理但人工判断可以安全跳过
+- **手动完成**：某些步骤需要人工在浏览器中实际操作（如拖动验证码滑块），完成后标记步骤完成并继续
+- **终止**：发现任务本身有问题（如操作目标不存在），直接终止而非继续尝试
+
+## 金融企业场景下的工程意义
+
+**AI 故障不等于业务中断**：传统 RPA 在 AI 解析失败时通常直接报错退出。在银行的日终批处理场景中，一个 500 笔转账任务因为其中一笔的页面解析失败而全部中止，影响范围和修复成本都很高。三层容错 + NEEDS_HUMAN 降级确保了 AI 的非确定性不会传导为业务的确定性中断。
+
+**成本优化**：金融 RPA 系统的 LLM 调用量可观（每个 action 至少一次）。通过页面复杂度路由，简单页面（占比通常 60%+）使用廉价模型，仅复杂页面使用昂贵模型。以 Claude 为例，Haiku 与 Opus 的价格差距可达 30 倍以上，模型路由可以显著降低 LLM 使用成本。
+
+**可审计的 AI 决策链**：模型路由的 reason 字段、LLM 调用的重试日志、NEEDS_HUMAN 的错误记录，形成了完整的 AI 决策审计链。当监管机构询问"为什么这笔操作是自动执行的"或"AI 在哪一步做了什么判断"时，系统可以提供完整的决策轨迹。
+
+**状态机保障业务一致性**：`validate_transition()` 在代码层面防止了非法状态跳转。例如，一个已完成的任务不可能被重新启动，一个正在等待审批的任务不可能被标记为"已完成"（必须先获得审批或被拒绝）。这种显式的状态约束避免了并发场景下的状态混乱。
+
+## 踩坑记录
+
+1. **Pydantic V2 的 model_json_schema()**：Pydantic V1 使用 `schema()` 方法生成 JSON Schema，V2 改为 `model_json_schema()`。项目使用的 Pydantic 版本为 V2（随 FastAPI 安装），初始代码中调用了旧 API 导致 AttributeError
+2. **指数退避在测试中的处理**：实际的 `asyncio.sleep()` 会让测试变慢。通过传入 `retry_delays=[0, 0, 0]` 将测试中的等待时间归零，既验证了重试逻辑又不浪费测试时间
