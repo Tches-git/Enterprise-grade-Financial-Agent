@@ -14,7 +14,12 @@ module.exports = {
       padding: "2rem",
     },
     extend: {
+      backdropBlur: {
+        glass: "12px",
+      },
       colors: {
+        "finrpa-blue": "#1A3A5C",
+        "finrpa-gold": "#C9A84C",
         slate: {
           elevation1: "hsl(var(--slate-elevation-1))",
           elevation2: "hsl(var(--slate-elevation-2))",

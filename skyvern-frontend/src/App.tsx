@@ -29,7 +29,7 @@ function App() {
           options={postHogOptions}
         >
           <QueryClientProvider client={queryClient}>
-            <ThemeProvider defaultTheme="dark">
+            <ThemeProvider defaultTheme="light">
               <RouterProvider router={router} />
             </ThemeProvider>
           </QueryClientProvider>

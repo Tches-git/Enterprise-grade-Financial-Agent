@@ -8,10 +8,10 @@ function Sidebar() {
   return (
     <aside
       className={cn(
-        "fixed hidden h-screen min-h-screen border-r-2 px-6 lg:block",
+        "glass-sidebar fixed hidden h-screen min-h-screen lg:block",
         {
           "w-64": !collapsed,
-          "w-28": collapsed,
+          "w-20": collapsed,
         },
       )}
     >
