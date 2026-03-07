@@ -1,0 +1,83 @@
+/*
+ * FinRPA Enterprise Design Tokens
+ * White frosted-glass style with deep-sea blue accent
+ */
+
+:root {
+  /* === Primary Colors === */
+  --finrpa-blue: #1A3A5C;
+  --finrpa-blue-light: #2A5A8C;
+  --finrpa-blue-dark: #0F2440;
+  --finrpa-gold: #C9A84C;
+  --finrpa-gold-light: #DFC474;
+  --finrpa-gold-dark: #A68A30;
+
+  /* === Background === */
+  --finrpa-bg: #F8F9FA;
+  --finrpa-bg-alt: #F0F2F5;
+
+  /* === Text === */
+  --finrpa-text-primary: #1A1A2E;
+  --finrpa-text-secondary: #6B7280;
+  --finrpa-text-muted: #9CA3AF;
+  --finrpa-text-white: #FFFFFF;
+
+  /* === Glass Properties === */
+  --glass-bg: rgba(255, 255, 255, 0.72);
+  --glass-bg-hover: rgba(255, 255, 255, 0.85);
+  --glass-border: rgba(255, 255, 255, 0.6);
+  --glass-blur: 12px;
+  --glass-shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+  --glass-shadow-hover: 0 8px 32px rgba(0, 0, 0, 0.1);
+
+  /* === Sidebar === */
+  --sidebar-width: 256px;
+  --sidebar-collapsed-width: 72px;
+  --sidebar-bg: rgba(255, 255, 255, 0.82);
+
+  /* === Spacing === */
+  --space-xs: 4px;
+  --space-sm: 8px;
+  --space-md: 16px;
+  --space-lg: 24px;
+  --space-xl: 32px;
+  --space-2xl: 48px;
+
+  /* === Border Radius === */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  /* === Status Colors === */
+  --status-running: #3B82F6;
+  --status-completed: #10B981;
+  --status-failed: #EF4444;
+  --status-pending-approval: #C9A84C;
+  --status-needs-human: #F97316;
+  --status-paused: #8B5CF6;
+  --status-queued: #6B7280;
+  --status-timeout: #DC2626;
+
+  /* === Risk Colors === */
+  --risk-low: #10B981;
+  --risk-medium: #F59E0B;
+  --risk-high: #EF4444;
+  --risk-critical: #991B1B;
+
+  /* === Charts === */
+  --chart-axis: #E5E7EB;
+  --chart-grid: #F3F4F6;
+  --chart-blue: #1A3A5C;
+  --chart-gold: #C9A84C;
+  --chart-green: #10B981;
+  --chart-red: #EF4444;
+  --chart-purple: #8B5CF6;
+  --chart-cyan: #06B6D4;
+
+  /* === Transitions === */
+  --transition-fast: 150ms ease;
+  --transition-normal: 200ms ease;
+  --transition-slow: 300ms ease;
+}

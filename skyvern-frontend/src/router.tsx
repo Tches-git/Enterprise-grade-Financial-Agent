@@ -30,6 +30,10 @@ import { WorkflowRunCode } from "@/routes/workflows/workflowRun/WorkflowRunCode"
 import { DebugStoreProvider } from "@/store/DebugStoreContext";
 import { CredentialsPage } from "@/routes/credentials/CredentialsPage.tsx";
 import { RunRouter } from "@/routes/runs/RunRouter";
+import { DashboardPage } from "@/routes/enterprise/dashboard/DashboardPage";
+import { ApprovalsPage } from "@/routes/enterprise/approvals/ApprovalsPage";
+import { AuditLogsPage } from "@/routes/enterprise/audit/AuditLogsPage";
+import { PermissionsPage } from "@/routes/enterprise/permissions/PermissionsPage";
 
 const router = createBrowserRouter([
   {
@@ -244,6 +248,46 @@ const router = createBrowserRouter([
           {
             index: true,
             element: <CredentialsPage />,
+          },
+        ],
+      },
+      {
+        path: "enterprise/dashboard",
+        element: <PageLayout />,
+        children: [
+          {
+            index: true,
+            element: <DashboardPage />,
+          },
+        ],
+      },
+      {
+        path: "enterprise/approvals",
+        element: <PageLayout />,
+        children: [
+          {
+            index: true,
+            element: <ApprovalsPage />,
+          },
+        ],
+      },
+      {
+        path: "enterprise/audit",
+        element: <PageLayout />,
+        children: [
+          {
+            index: true,
+            element: <AuditLogsPage />,
+          },
+        ],
+      },
+      {
+        path: "enterprise/permissions",
+        element: <PageLayout />,
+        children: [
+          {
+            index: true,
+            element: <PermissionsPage />,
           },
         ],
       },
