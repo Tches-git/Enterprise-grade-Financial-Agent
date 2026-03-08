@@ -149,6 +149,7 @@ function CostSection({ data }: { data: CostData }) {
   const { t } = useI18n();
 
   const pieOption = {
+    color: data.breakdown.map((b) => tierColors[b.model_tier] ?? "#999"),
     tooltip: {
       trigger: "item" as const,
       formatter: "{b}: ${c} ({d}%)",
@@ -163,6 +164,7 @@ function CostSection({ data }: { data: CostData }) {
           itemStyle: { color: tierColors[b.model_tier] ?? "#999" },
         })),
         label: { color: "#374155", fontSize: 11 },
+        emphasis: { scaleSize: 6 },
       },
     ],
   };
