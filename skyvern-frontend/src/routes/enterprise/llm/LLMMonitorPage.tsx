@@ -132,12 +132,18 @@ function demoStuckTasks(): StuckTask[] {
 // ── Tier display helpers ──
 
 const tierLabels: Record<string, string> = {
+  light: "Haiku / 4o-mini",
+  standard: "Sonnet / GPT-4o",
+  heavy: "Opus / GPT-4",
   LIGHT: "Haiku / 4o-mini",
   STANDARD: "Sonnet / GPT-4o",
   HEAVY: "Opus / GPT-4",
 };
 
 const tierColors: Record<string, string> = {
+  light: "#10B981",
+  standard: "#3B82F6",
+  heavy: "#8B5CF6",
   LIGHT: "#10B981",
   STANDARD: "#3B82F6",
   HEAVY: "#8B5CF6",
