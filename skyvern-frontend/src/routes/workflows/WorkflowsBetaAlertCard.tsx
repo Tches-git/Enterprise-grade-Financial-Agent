@@ -13,7 +13,7 @@ function WorkflowsBetaAlertCard() {
       <div className="flex gap-4 py-4">
         <Button variant="secondary" asChild>
           <a
-            href="https://github.com/Musenn/finrpa-enterprise"
+            href="https://github.com/Tches-git/Enterprise-grade-Financial-Agent"
             target="_blank"
             rel="noopener noreferrer"
           >

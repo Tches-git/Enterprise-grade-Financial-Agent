@@ -128,11 +128,10 @@ function CredentialsPage() {
       </Tabs>
       <CredentialsModal onStartBackgroundTest={startBackgroundTest} />
 
-      {/* Footer note - only for Passwords and Credit Cards tabs */}
       {activeTab !== "twoFactor" && (
         <div className="mt-8 border-t border-slate-700 pt-4">
           <div className="text-sm italic text-slate-400">
-            <strong>{t("common.note")}</strong> {t("credentials.bitwardenNote1")}{" "}
+            <strong>{t("common.note")}</strong> {t("credentials.bitwardenNote1")} 
             <a
               href="https://bitwarden.com/help/self-host-an-organization/"
               target="_blank"
@@ -141,7 +140,7 @@ function CredentialsPage() {
             >
               {t("credentials.selfHostedBitwarden")}
             </a>{" "}
-            {t("credentials.bitwardenNote2")}{" "}
+            {t("credentials.bitwardenNote2")} 
             <a
               href="https://github.com/dani-garcia/vaultwarden"
               target="_blank"
@@ -150,9 +149,9 @@ function CredentialsPage() {
             >
               {t("credentials.communityVersion")}
             </a>{" "}
-            {t("credentials.bitwardenNote3")}{" "}
+            {t("credentials.bitwardenNote3")} 
             <a
-              href="https://github.com/Musenn/finrpa-enterprise"
+              href="https://github.com/Tches-git/Enterprise-grade-Financial-Agent"
               target="_blank"
               rel="noopener noreferrer"
               className="text-blue-400 underline hover:text-blue-300"

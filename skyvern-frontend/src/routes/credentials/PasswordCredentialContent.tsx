@@ -37,7 +37,7 @@ type Props = {
     totp_type: "authenticator" | "email" | "text" | "none";
     totp_identifier: string;
   }) => void;
-  /** Login page URL value — when onUrlChange is provided, a URL field is rendered after Name */
+  /** Login page URL value �?when onUrlChange is provided, a URL field is rendered after Name */
   url?: string;
   onUrlChange?: (url: string) => void;
   /** Show a required asterisk on the URL label */
@@ -219,7 +219,7 @@ function PasswordCredentialContent({
         </div>
         {valuesReadOnly ? (
           <div className="relative w-full">
-            <Input value="••••••••" readOnly className="pr-9 opacity-70" />
+            <Input value="•••••••�? readOnly className="pr-9 opacity-70" />
             <button
               type="button"
               className="absolute right-0 top-0 flex size-9 cursor-pointer items-center justify-center text-muted-foreground hover:text-foreground"
@@ -236,7 +236,7 @@ function PasswordCredentialContent({
               type={showPassword ? "text" : "password"}
               value={password}
               onChange={(e) => updateValues({ password: e.target.value })}
-              placeholder={editMode ? "••••••••" : undefined}
+              placeholder={editMode ? "•••••••�? : undefined}
             />
             <div
               className="absolute right-0 top-0 flex size-9 cursor-pointer items-center justify-center"
@@ -341,7 +341,7 @@ function PasswordCredentialContent({
                   </div>
                   <p className="text-sm text-slate-400">
                     <Link
-                      to="https://github.com/Musenn/finrpa-enterprise"
+                      to="https://github.com/Tches-git/Enterprise-grade-Financial-Agent"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="underline underline-offset-2"
@@ -350,7 +350,7 @@ function PasswordCredentialContent({
                     </Link>{" "}
                     {t("common.or")}{" "}
                     <Link
-                      to="https://github.com/Musenn/finrpa-enterprise"
+                      to="https://github.com/Tches-git/Enterprise-grade-Financial-Agent"
                       target="_blank"
                       rel="noopener noreferrer"
                       className="underline underline-offset-2"
@@ -371,7 +371,7 @@ function PasswordCredentialContent({
                     {valuesReadOnly ? (
                       <div className="relative w-full">
                         <Input
-                          value="••••••••"
+                          value="•••••••�?
                           readOnly
                           className="pr-9 opacity-70"
                         />
@@ -388,7 +388,7 @@ function PasswordCredentialContent({
                       <Input
                         value={totp}
                         onChange={(e) => updateValues({ totp: e.target.value })}
-                        placeholder={editMode ? "••••••••" : undefined}
+                        placeholder={editMode ? "•••••••�? : undefined}
                       />
                     )}
                   </div>

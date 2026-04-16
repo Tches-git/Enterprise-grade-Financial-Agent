@@ -24,11 +24,11 @@ function Header() {
           <LanguageSwitcher />
           <div className="h-7">
             <GitHubButton
-              href="https://github.com/Musenn/finrpa-enterprise"
+              href="https://github.com/Tches-git/Enterprise-grade-Financial-Agent"
               data-color-scheme="no-preference: dark; light: dark; dark: dark;"
               data-size="large"
               data-show-count="true"
-              aria-label="Star Musenn/finrpa-enterprise on GitHub"
+              aria-label="Star Tches-git/Enterprise-grade-Financial-Agent on GitHub"
             >
               Star
             </GitHubButton>
