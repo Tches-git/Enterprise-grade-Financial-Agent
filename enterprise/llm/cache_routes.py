@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends
 from enterprise.auth.dependencies import require_admin
 from enterprise.auth.schemas import UserContext
 
-from .action_cache import get_cache_store
+from .action_cache import explain_cache_key, get_cache_store
 
 router = APIRouter(prefix="/enterprise/cache", tags=["cache"])
 
@@ -17,7 +17,6 @@ router = APIRouter(prefix="/enterprise/cache", tags=["cache"])
 async def cache_stats(
     user: UserContext = Depends(require_admin),
 ) -> dict:
-    """Return cache hit/miss statistics."""
     store = get_cache_store()
     return store.stats
 
@@ -27,11 +26,8 @@ async def clear_task_cache(
     task_id: str,
     user: UserContext = Depends(require_admin),
 ) -> dict:
-    """Clear all cached action decisions for a specific task."""
     store = get_cache_store()
     prefix = f"action_cache:{user.org_id}:"
-    # We cannot filter by task_id within the key structure (keyed by DOM+goal),
-    # but we can clear all entries for the org as a fallback.
     removed = store.clear_by_prefix(prefix)
     return {"removed": removed, "task_id": task_id}
 
@@ -40,7 +36,6 @@ async def clear_task_cache(
 async def clear_expired_cache(
     user: UserContext = Depends(require_admin),
 ) -> dict:
-    """Remove all expired cache entries."""
     store = get_cache_store()
     removed = store.clear_expired()
     return {"removed": removed}
@@ -50,7 +45,6 @@ async def clear_expired_cache(
 async def clear_all_cache(
     user: UserContext = Depends(require_admin),
 ) -> dict:
-    """Clear the entire action cache."""
     store = get_cache_store()
     removed = store.clear_all()
     return {"removed": removed}
@@ -60,7 +54,18 @@ async def clear_all_cache(
 async def reset_cache_stats(
     user: UserContext = Depends(require_admin),
 ) -> dict:
-    """Reset hit/miss counters."""
     store = get_cache_store()
     store.reset_stats()
     return {"status": "ok"}
+
+
+@router.post("/explain")
+async def explain_cache(
+    payload: dict,
+    user: UserContext = Depends(require_admin),
+) -> dict:
+    return explain_cache_key(
+        org_id=user.org_id,
+        dom_html=payload.get("dom_html", ""),
+        navigation_goal=payload.get("navigation_goal", ""),
+    )

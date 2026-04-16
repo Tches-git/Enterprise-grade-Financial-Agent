@@ -7,6 +7,7 @@ PlannerAgent, ExecutorAgent, and AgentCoordinator.
 import enum
 import uuid
 from datetime import datetime
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -17,7 +18,7 @@ class FailureStrategy(str, enum.Enum):
     RETRY = "retry"
     SKIP = "skip"
     ABORT = "abort"
-    REPLAN = "replan"  # ask Planner to revise remaining steps
+    REPLAN = "replan"
 
 
 class SubTaskStatus(str, enum.Enum):
@@ -28,7 +29,12 @@ class SubTaskStatus(str, enum.Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     SKIPPED = "skipped"
-    REPLANNED = "replanned"  # replaced by a new plan
+    REPLANNED = "replanned"
+
+
+class FunctionCallPlan(BaseModel):
+    name: str = Field(description="Suggested tool or capability name")
+    arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 class SubTask(BaseModel):
@@ -45,6 +51,10 @@ class SubTask(BaseModel):
         default=FailureStrategy.REPLAN,
         description="What to do on failure",
     )
+    function_call: FunctionCallPlan | None = Field(
+        default=None,
+        description="Optional structured tool hint emitted by the planner",
+    )
     status: SubTaskStatus = Field(default=SubTaskStatus.PENDING)
     error_message: str | None = None
     result_data: dict | None = None
@@ -57,6 +67,7 @@ class TaskPlan(BaseModel):
 
     plan_id: str = Field(default_factory=lambda: f"plan_{uuid.uuid4().hex[:12]}")
     navigation_goal: str = Field(description="Original user goal")
+    reasoning: str | None = Field(default=None, description="Planner rationale summary")
     subtasks: list[SubTask] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.utcnow)
     is_replan: bool = Field(
@@ -74,7 +85,7 @@ class ExecutionResult(BaseModel):
     success: bool
     result_data: dict | None = None
     error_message: str | None = None
-    screenshot_key: str | None = None  # MinIO key for page state
+    screenshot_key: str | None = None
     page_url: str | None = None
     duration_ms: int | None = None
 
@@ -92,5 +103,5 @@ class CoordinationState(BaseModel):
     )
     total_replans: int = 0
     max_replans: int = Field(default=3)
-    status: str = "running"  # running / completed / failed / needs_human
+    status: str = "running"
     error_message: str | None = None

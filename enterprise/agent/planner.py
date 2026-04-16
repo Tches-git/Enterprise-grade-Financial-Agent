@@ -14,7 +14,11 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .schemas import FailureStrategy, SubTask, TaskPlan
+from enterprise.agent.framework.base_agent import BaseAgent
+from enterprise.agent.framework.message import AgentMessage, AgentResponse
+from enterprise.rag.rag_chain import RAGChain
+
+from .schemas import FailureStrategy, FunctionCallPlan, SubTask, TaskPlan
 
 logger = logging.getLogger(__name__)
 
@@ -22,71 +26,57 @@ logger = logging.getLogger(__name__)
 class PlannerOutput(BaseModel):
     """Schema for LLM-generated plan output."""
 
-    steps: list[dict[str, Any]] = Field(
-        description="Ordered list of sub-tasks",
-    )
+    reasoning: str | None = Field(default=None, description="Brief rationale for the plan")
+    steps: list[dict[str, Any]] = Field(description="Ordered list of sub-tasks")
 
 
 PLANNER_SYSTEM_PROMPT = """\
-You are a financial RPA planning agent. Your job is to decompose a navigation \
-goal into a sequence of concrete sub-tasks that a browser automation executor \
-can perform step by step.
+You are a senior financial RPA planning agent.
+Your job is to decompose a navigation goal into a sequence of concrete sub-tasks that a browser automation executor can perform step by step.
+
+## Planning principles
+1. Think about prerequisite authentication, navigation, data validation, and final confirmation.
+2. Prefer plans that are auditable, low-risk, and robust to UI changes.
+3. If the goal involves regulated workflows, include explicit review or verification steps.
+4. If a step obviously maps to a reusable capability, emit a `function_call` object.
 
 Each sub-task must have:
 - "goal": a clear, actionable description of what to do
-- "completion_condition": how to verify success (e.g. "page URL contains /dashboard")
+- "completion_condition": how to verify success
 - "failure_strategy": one of "retry", "skip", "abort", "replan"
-- "max_retries": integer (default 2)
+- "max_retries": integer
+- optional "function_call": {"name": string, "arguments": object}
 
-Output ONLY a JSON object with a "steps" array. No other text.
-
-Example:
-{
-  "steps": [
-    {"goal": "Login to the system", "completion_condition": "URL contains /home", "failure_strategy": "abort", "max_retries": 3},
-    {"goal": "Navigate to account page", "completion_condition": "Page title contains Account", "failure_strategy": "replan", "max_retries": 2}
-  ]
-}
+Output ONLY a JSON object with "reasoning" and "steps" fields. No other text.
 """
 
 REPLAN_SYSTEM_PROMPT = """\
-You are a financial RPA planning agent. A previous plan failed at a specific \
-step. You are given the original goal, the steps completed so far, and the \
-failure details. Generate a REVISED plan for the remaining steps only. \
-Do NOT repeat already-completed steps.
+You are a senior financial RPA replanning agent.
+A previous execution plan failed. You are given the original goal, the steps already completed, the failed step, and the latest context.
 
-Output ONLY a JSON object with a "steps" array.
+## Replanning rules
+1. Generate ONLY the remaining steps.
+2. Do NOT repeat completed steps.
+3. If the failure suggests the path is blocked, choose a different navigation strategy.
+4. Return a JSON object with "reasoning" and "steps".
 """
 
 
-class PlannerAgent:
-    """Decomposes navigation goals into sub-task plans.
+class PlannerAgent(BaseAgent):
+    """Decomposes navigation goals into sub-task plans."""
 
-    Uses an LLM to generate structured plans. Falls back to a
-    single-step plan if LLM is unavailable.
-    """
+    agent_name = "planner"
+    agent_description = "Creates and revises structured browser automation plans"
+    capabilities = ["plan_request", "replan_request"]
 
-    def __init__(self, llm_callable=None):
-        """
-        Args:
-            llm_callable: async function(prompt: str) -> str
-        """
-        self.llm_callable = llm_callable
+    def __init__(self, llm_callable=None, rag_chain: RAGChain | None = None):
+        super().__init__(llm_callable=llm_callable, rag_chain=rag_chain, model_tier="standard")
 
     async def create_plan(
         self,
         navigation_goal: str,
         context: dict[str, Any] | None = None,
     ) -> TaskPlan:
-        """Generate an initial task plan from a navigation goal.
-
-        Args:
-            navigation_goal: High-level goal (e.g. "Download bank statements for Q1 2026").
-            context: Optional context (current URL, page state, etc.).
-
-        Returns:
-            TaskPlan with ordered SubTasks.
-        """
         if self.llm_callable:
             return await self._plan_with_llm(navigation_goal, context)
         return self._create_fallback_plan(navigation_goal)
@@ -99,26 +89,14 @@ class PlannerAgent:
         failure_reason: str,
         context: dict[str, Any] | None = None,
     ) -> TaskPlan:
-        """Generate a revised plan after a sub-task failure.
-
-        Args:
-            original_goal: The original navigation goal.
-            completed_subtasks: Sub-tasks that completed successfully.
-            failed_subtask: The sub-task that failed.
-            failure_reason: Why it failed (error message, screenshot description).
-            context: Current page state context.
-
-        Returns:
-            Revised TaskPlan for remaining steps.
-        """
         if self.llm_callable:
             return await self._replan_with_llm(
                 original_goal, completed_subtasks, failed_subtask, failure_reason, context,
             )
 
-        # Fallback: skip the failed step and create a continuation plan
         return TaskPlan(
             navigation_goal=original_goal,
+            reasoning="Fallback continuation plan after replanning failure.",
             subtasks=[
                 SubTask(
                     index=0,
@@ -132,54 +110,73 @@ class PlannerAgent:
             version=len(completed_subtasks) + 2,
         )
 
+    async def handle_message(self, message: AgentMessage) -> AgentResponse:
+        try:
+            if message.type == "plan_request":
+                goal = str(message.payload.get("navigation_goal") or message.payload.get("goal") or "")
+                plan = await self.create_plan(goal, message.context)
+                return AgentResponse(
+                    message_id=message.message_id,
+                    agent_name=self.agent_name,
+                    success=True,
+                    result={"task_plan": plan.model_dump(), "task_plan_model": plan},
+                )
+
+            if message.type == "replan_request":
+                failed_subtask_payload = message.payload.get("failed_subtask", {})
+                completed_subtasks_payload = message.payload.get("completed_subtasks", [])
+                plan = await self.replan(
+                    original_goal=str(message.payload.get("navigation_goal") or ""),
+                    completed_subtasks=[SubTask.model_validate(item) for item in completed_subtasks_payload],
+                    failed_subtask=SubTask.model_validate(failed_subtask_payload),
+                    failure_reason=str(message.payload.get("failure_reason") or "Unknown error"),
+                    context=message.context,
+                )
+                return AgentResponse(
+                    message_id=message.message_id,
+                    agent_name=self.agent_name,
+                    success=True,
+                    result={"task_plan": plan.model_dump(), "task_plan_model": plan},
+                )
+        except Exception as exc:
+            return AgentResponse(
+                message_id=message.message_id,
+                agent_name=self.agent_name,
+                success=False,
+                error=str(exc),
+            )
+
+        return AgentResponse(
+            message_id=message.message_id,
+            agent_name=self.agent_name,
+            success=False,
+            error=f"Unsupported message type: {message.type}",
+        )
+
     async def _plan_with_llm(
         self,
         navigation_goal: str,
         context: dict[str, Any] | None,
     ) -> TaskPlan:
-        """Generate plan using LLM."""
         ctx_str = json.dumps(context) if context else "No additional context."
+        examples_section = await self._build_examples_section(
+            query=navigation_goal,
+            filter_metadata={"type": "workflow_example"},
+            heading="Reference successful plans",
+        )
         prompt = (
             f"{PLANNER_SYSTEM_PROMPT}\n\n"
             f"## Navigation Goal\n{navigation_goal}\n\n"
             f"## Context\n{ctx_str}\n"
+            f"{examples_section}"
         )
 
         try:
             raw = await self.llm_callable(prompt)
-            # Parse LLM output
-            cleaned = raw.strip()
-            if cleaned.startswith("```"):
-                lines = cleaned.split("\n")
-                cleaned = "\n".join(lines[1:-1])
-            data = json.loads(cleaned)
-
-            subtasks = []
-            for i, step in enumerate(data.get("steps", [])):
-                subtasks.append(SubTask(
-                    index=i,
-                    goal=step.get("goal", f"Step {i + 1}"),
-                    completion_condition=step.get("completion_condition", ""),
-                    max_retries=step.get("max_retries", 2),
-                    failure_strategy=FailureStrategy(
-                        step.get("failure_strategy", "replan")
-                    ),
-                ))
-
-            plan = TaskPlan(
-                navigation_goal=navigation_goal,
-                subtasks=subtasks,
-            )
-            logger.info(
-                "PlannerAgent: created plan with %d sub-tasks for: %s",
-                len(subtasks), navigation_goal,
-            )
-            return plan
-
-        except Exception as e:
-            logger.warning(
-                "PlannerAgent: LLM planning failed (%s), using fallback", e,
-            )
+            data = self._load_llm_json(raw)
+            return self._build_task_plan(navigation_goal, data)
+        except Exception as exc:
+            logger.warning("PlannerAgent: LLM planning failed (%s), using fallback", exc)
             return self._create_fallback_plan(navigation_goal)
 
     async def _replan_with_llm(
@@ -190,10 +187,14 @@ class PlannerAgent:
         failure_reason: str,
         context: dict[str, Any] | None,
     ) -> TaskPlan:
-        """Generate revised plan using LLM."""
         completed_summary = "\n".join(
-            f"- Step {s.index}: {s.goal} [COMPLETED]"
-            for s in completed_subtasks
+            f"- Step {subtask.index}: {subtask.goal} [COMPLETED]"
+            for subtask in completed_subtasks
+        )
+        examples_section = await self._build_examples_section(
+            query=f"{original_goal} {failure_reason}",
+            filter_metadata={"type": "workflow_example"},
+            heading="Reference fallback patterns",
         )
         prompt = (
             f"{REPLAN_SYSTEM_PROMPT}\n\n"
@@ -202,45 +203,25 @@ class PlannerAgent:
             f"## Failed Step\nStep {failed_subtask.index}: {failed_subtask.goal}\n"
             f"Failure reason: {failure_reason}\n\n"
             f"## Context\n{json.dumps(context) if context else 'None'}\n"
+            f"{examples_section}"
         )
 
         try:
             raw = await self.llm_callable(prompt)
-            cleaned = raw.strip()
-            if cleaned.startswith("```"):
-                lines = cleaned.split("\n")
-                cleaned = "\n".join(lines[1:-1])
-            data = json.loads(cleaned)
-
-            subtasks = []
-            for i, step in enumerate(data.get("steps", [])):
-                subtasks.append(SubTask(
-                    index=len(completed_subtasks) + i,
-                    goal=step.get("goal", f"Step {i + 1}"),
-                    completion_condition=step.get("completion_condition", ""),
-                    max_retries=step.get("max_retries", 2),
-                    failure_strategy=FailureStrategy(
-                        step.get("failure_strategy", "replan")
-                    ),
-                ))
-
-            plan = TaskPlan(
-                navigation_goal=original_goal,
-                subtasks=subtasks,
+            data = self._load_llm_json(raw)
+            return self._build_task_plan(
+                original_goal,
+                data,
                 is_replan=True,
                 replan_reason=failure_reason,
+                index_offset=len(completed_subtasks),
                 version=len(completed_subtasks) + 2,
             )
-            logger.info(
-                "PlannerAgent: replanned with %d new sub-tasks (reason: %s)",
-                len(subtasks), failure_reason[:80],
-            )
-            return plan
-
-        except Exception as e:
-            logger.warning("PlannerAgent: LLM replan failed (%s), using fallback", e)
+        except Exception as exc:
+            logger.warning("PlannerAgent: LLM replan failed (%s), using fallback", exc)
             return TaskPlan(
                 navigation_goal=original_goal,
+                reasoning="Fallback continuation plan after replanning failure.",
                 subtasks=[
                     SubTask(
                         index=len(completed_subtasks),
@@ -254,10 +235,76 @@ class PlannerAgent:
                 version=len(completed_subtasks) + 2,
             )
 
+    async def _build_examples_section(
+        self,
+        query: str,
+        filter_metadata: dict[str, Any],
+        heading: str,
+    ) -> str:
+        if not self.rag_chain:
+            return ""
+        rag_context = await self.rag_chain.build_augmented_context(
+            query=query,
+            filter_metadata=filter_metadata,
+            max_context_tokens=1000,
+        )
+        if not rag_context.augmented_text:
+            return ""
+        return f"\n\n## {heading}\n{rag_context.augmented_text}\n"
+
+    def _build_task_plan(
+        self,
+        navigation_goal: str,
+        data: dict[str, Any],
+        *,
+        is_replan: bool = False,
+        replan_reason: str | None = None,
+        index_offset: int = 0,
+        version: int = 1,
+    ) -> TaskPlan:
+        subtasks: list[SubTask] = []
+        for i, step in enumerate(data.get("steps", [])):
+            function_call = step.get("function_call")
+            subtasks.append(
+                SubTask(
+                    index=index_offset + i,
+                    goal=step.get("goal", f"Step {i + 1}"),
+                    completion_condition=step.get("completion_condition", ""),
+                    max_retries=step.get("max_retries", 2),
+                    failure_strategy=FailureStrategy(step.get("failure_strategy", "replan")),
+                    function_call=FunctionCallPlan.model_validate(function_call) if function_call else None,
+                )
+            )
+
+        plan = TaskPlan(
+            navigation_goal=navigation_goal,
+            reasoning=data.get("reasoning"),
+            subtasks=subtasks,
+            is_replan=is_replan,
+            replan_reason=replan_reason,
+            version=version,
+        )
+        logger.info(
+            "PlannerAgent: created plan with %d sub-tasks for: %s",
+            len(subtasks),
+            navigation_goal,
+        )
+        return plan
+
+    @staticmethod
+    def _load_llm_json(raw: str | dict[str, Any]) -> dict[str, Any]:
+        if isinstance(raw, dict):
+            return raw
+        cleaned = raw.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.split("\n")
+            cleaned = "\n".join(lines[1:-1])
+        return json.loads(cleaned)
+
     def _create_fallback_plan(self, navigation_goal: str) -> TaskPlan:
-        """Create a simple single-step plan (no LLM needed)."""
         return TaskPlan(
             navigation_goal=navigation_goal,
+            reasoning="Fallback single-step plan generated without LLM.",
             subtasks=[
                 SubTask(
                     index=0,

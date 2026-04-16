@@ -23,6 +23,11 @@ coverage.xml
 venv/
 env/
 
+# Local environment
+.env
+.env.*
+!.env.example
+
 # IDE
 .idea/
 .vscode/
@@ -41,6 +46,11 @@ har/
 log/
 *.log
 .streamlit/
+
+# Data / local persistence
+data/
+*.sqlite
+*.db
 
 # OS
 .DS_Store

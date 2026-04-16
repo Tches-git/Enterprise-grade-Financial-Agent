@@ -34,11 +34,6 @@ LOG = structlog.get_logger()
 
 
 def format_validation_errors(exc: ValidationError) -> str:
-    """Format a Pydantic ValidationError into a human-readable string.
-
-    Filters out uninformative path segments ('__root__', 'body') and joins
-    multiple errors with '; '.
-    """
     error_messages = []
     for error in exc.errors():
         loc = " -> ".join(str(part) for part in error["loc"] if part not in ("__root__", "body"))
@@ -81,8 +76,6 @@ def custom_openapi(app: FastAPI) -> dict:
 
 @asynccontextmanager
 async def lifespan(fastapi_app: FastAPI) -> AsyncGenerator[None, Any]:
-    """Lifespan context manager for FastAPI app startup and shutdown."""
-
     LOG.info("Server started")
     if forge_app.api_app_startup_event:
         LOG.info("Calling api app startup event")
@@ -91,21 +84,15 @@ async def lifespan(fastapi_app: FastAPI) -> AsyncGenerator[None, Any]:
         except Exception:
             LOG.exception("Failed to execute api app startup event")
 
-    # Close browser sessions left active by a previous process
     try:
         await forge_app.PERSISTENT_SESSIONS_MANAGER.cleanup_stale_sessions()
     except Exception:
         LOG.exception("Failed to clean up stale browser sessions")
 
-    # Start cleanup scheduler if enabled
     cleanup_task = start_cleanup_scheduler()
     if cleanup_task:
         LOG.info("Cleanup scheduler started")
 
-    # Start MCP sub-application lifespan if mounted. Starlette Mount does NOT
-    # forward lifespan events to sub-apps, so we must enter the MCP app's
-    # lifespan here. This initializes the streamable-http session manager's
-    # task group which is required for handling MCP requests.
     mcp_app = getattr(fastapi_app.state, "mcp_starlette_app", None)
     if mcp_app:
         async with mcp_app.lifespan(mcp_app):
@@ -115,24 +102,20 @@ async def lifespan(fastapi_app: FastAPI) -> AsyncGenerator[None, Any]:
     else:
         yield
 
-    # Stop cleanup scheduler
     await stop_cleanup_scheduler()
 
-    # Close notification registry (e.g. cancel Redis listener tasks)
     from skyvern.forge.sdk.notification.factory import NotificationRegistryFactory
 
     registry = NotificationRegistryFactory.get_registry()
     if hasattr(registry, "close"):
         await registry.close()
 
-    # Close shared Redis client (after registry so listener tasks drain first)
     from skyvern.forge.sdk.redis.factory import RedisClientFactory
 
     redis_client = RedisClientFactory.get_client()
     if redis_client is not None:
         await redis_client.close()
 
-    # Close all persistent browser sessions
     from skyvern.webeye.default_persistent_sessions_manager import DefaultPersistentSessionsManager
 
     await DefaultPersistentSessionsManager.close()
@@ -147,13 +130,6 @@ async def lifespan(fastapi_app: FastAPI) -> AsyncGenerator[None, Any]:
 
 
 def create_api_app() -> FastAPI:
-    """
-    Start the agent server.
-    """
-    # CRITICAL: Initialize OTEL FIRST, before any other code runs
-    # This must happen before start_forge_app() because that function
-    # creates database connections. If we don't instrument the libraries
-    # first, the DB spans won't be children of the HTTP request spans.
     if settings.OTEL_ENABLED and OTELSetup is not None:
         try:
             otel = OTELSetup.get_instance()
@@ -163,10 +139,8 @@ def create_api_app() -> FastAPI:
             LOG.warning("Failed to initialize OTEL tracer provider early", error=str(e))
 
     forge_app_instance = start_forge_app()
-
     fastapi_app = FastAPI(lifespan=lifespan)
 
-    # Add CORS middleware
     fastapi_app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.ALLOWED_ORIGINS,
@@ -179,19 +153,19 @@ def create_api_app() -> FastAPI:
     fastapi_app.include_router(legacy_base_router, prefix="/api/v1")
     fastapi_app.include_router(legacy_v2_router, prefix="/api/v2")
 
-    # Enterprise tenant isolation middleware
     from enterprise.tenant.middleware import TenantIsolationMiddleware
 
     fastapi_app.add_middleware(TenantIsolationMiddleware)
 
-    # Enterprise extension routes
-    from enterprise.auth.routes import router as enterprise_auth_router
-    from enterprise.tenant.routes import router as enterprise_tenant_router
     from enterprise.approval.routes import router as enterprise_approval_router
     from enterprise.audit.routes import router as enterprise_audit_router
-    from enterprise.workflows.routes import router as enterprise_workflow_router
+    from enterprise.auth.routes import router as enterprise_auth_router
     from enterprise.dashboard.routes import router as enterprise_dashboard_router
     from enterprise.llm.cache_routes import router as enterprise_cache_router
+    from enterprise.llm_eval.routes import router as enterprise_eval_router
+    from enterprise.rag.routes import router as enterprise_rag_router
+    from enterprise.tenant.routes import router as enterprise_tenant_router
+    from enterprise.workflows.routes import router as enterprise_workflow_router
 
     fastapi_app.include_router(enterprise_auth_router, prefix="/api/v1")
     fastapi_app.include_router(enterprise_tenant_router, prefix="/api/v1")
@@ -200,22 +174,18 @@ def create_api_app() -> FastAPI:
     fastapi_app.include_router(enterprise_workflow_router, prefix="/api/v1")
     fastapi_app.include_router(enterprise_dashboard_router, prefix="/api/v1")
     fastapi_app.include_router(enterprise_cache_router, prefix="/api/v1")
+    fastapi_app.include_router(enterprise_rag_router, prefix="/api/v1")
+    fastapi_app.include_router(enterprise_eval_router, prefix="/api/v1")
 
-    # Populate enterprise demo data stores so all modules have data on startup
     from enterprise.demo_seed import populate_all_stores
+
     populate_all_stores()
 
-    # Bridge enterprise JWT auth into Skyvern's native org auth so that
-    # endpoints like /workflows/create-from-prompt accept enterprise tokens.
-    from enterprise.auth.bridge import (
-        authenticate_enterprise_token,
-        authenticate_enterprise_user,
-    )
+    from enterprise.auth.bridge import authenticate_enterprise_token, authenticate_enterprise_user
 
     forge_app.authentication_function = authenticate_enterprise_token
     forge_app.authenticate_user_function = authenticate_enterprise_user
 
-    # local dev endpoints
     if settings.ENV == "local":
         fastapi_app.include_router(internal_auth.router, prefix="/v1")
         fastapi_app.include_router(internal_auth.router, prefix="/api/v1")
@@ -225,12 +195,7 @@ def create_api_app() -> FastAPI:
 
     fastapi_app.add_middleware(
         RawContextMiddleware,
-        plugins=(
-            # TODO (suchintan): We should set these up
-            ExecutionDatePlugin(),
-            # RequestIdPlugin(),
-            # UserAgentPlugin(),
-        ),
+        plugins=(ExecutionDatePlugin(),),
     )
 
     @fastapi_app.exception_handler(NotFoundError)

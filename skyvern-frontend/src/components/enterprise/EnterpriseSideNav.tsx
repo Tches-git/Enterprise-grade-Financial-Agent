@@ -11,28 +11,30 @@ import { useAuthStore } from "@/store/AuthStore";
 import type { MessageKey } from "@/i18n/locales";
 
 type NavItem = {
-  labelKey: MessageKey;
+  labelKey?: MessageKey;
+  labelText?: string;
   to: string;
   icon: IconName;
 };
 
 const buildSection: NavItem[] = [
-  { labelKey: "nav.discover",   to: "/discover",  icon: "search" },
-  { labelKey: "nav.tasks",      to: "/tasks",     icon: "task" },
-  { labelKey: "nav.workflows",  to: "/workflows", icon: "workflow" },
-  { labelKey: "nav.runs",       to: "/runs",      icon: "refresh" },
+  { labelKey: "nav.discover", to: "/discover", icon: "search" },
+  { labelKey: "nav.tasks", to: "/tasks", icon: "task" },
+  { labelKey: "nav.workflows", to: "/workflows", icon: "workflow" },
+  { labelKey: "nav.runs", to: "/runs", icon: "refresh" },
 ];
 
 const enterpriseSection: NavItem[] = [
-  { labelKey: "nav.dashboard",   to: "/enterprise/dashboard",    icon: "dashboard" },
-  { labelKey: "nav.approvals",   to: "/enterprise/approvals",    icon: "approval" },
-  { labelKey: "nav.auditLogs",   to: "/enterprise/audit",        icon: "audit" },
-  { labelKey: "nav.permissions", to: "/enterprise/permissions",  icon: "permissions" },
-  { labelKey: "nav.llmMonitor",  to: "/enterprise/llm",          icon: "workflow" },
+  { labelKey: "nav.dashboard", to: "/enterprise/dashboard", icon: "dashboard" },
+  { labelKey: "nav.approvals", to: "/enterprise/approvals", icon: "approval" },
+  { labelKey: "nav.auditLogs", to: "/enterprise/audit", icon: "audit" },
+  { labelKey: "nav.permissions", to: "/enterprise/permissions", icon: "permissions" },
+  { labelKey: "nav.llmMonitor", to: "/enterprise/llm", icon: "workflow" },
+  { labelText: "LLM Evaluation", to: "/enterprise/eval", icon: "dashboard" },
 ];
 
 const generalSection: NavItem[] = [
-  { labelKey: "nav.settings",    to: "/settings",     icon: "settings" },
+  { labelKey: "nav.settings", to: "/settings", icon: "settings" },
 ];
 
 function NavSection({
@@ -45,6 +47,8 @@ function NavSection({
   collapsed: boolean;
 }) {
   const { t } = useI18n();
+
+  const getLabel = (item: NavItem) => item.labelText ?? t(item.labelKey as MessageKey);
 
   return (
     <div className="mb-6">
@@ -67,13 +71,13 @@ function NavSection({
                 "justify-center px-2": collapsed,
               })
             }
-            title={collapsed ? t(item.labelKey) : undefined}
+            title={collapsed ? getLabel(item) : undefined}
           >
             <Icon
               name={item.icon}
               size={20}
             />
-            {!collapsed && <span>{t(item.labelKey)}</span>}
+            {!collapsed && <span>{getLabel(item)}</span>}
           </NavLink>
         ))}
       </div>
@@ -94,11 +98,10 @@ export function EnterpriseSideNav() {
 
   return (
     <nav className="flex-1 overflow-y-auto py-2">
-      <NavSection titleKey="nav.build"      items={buildSection}      collapsed={collapsed} />
+      <NavSection titleKey="nav.build" items={buildSection} collapsed={collapsed} />
       <NavSection titleKey="nav.enterprise" items={enterpriseSection} collapsed={collapsed} />
-      <NavSection titleKey="nav.general"    items={generalSection}    collapsed={collapsed} />
+      <NavSection titleKey="nav.general" items={generalSection} collapsed={collapsed} />
 
-      {/* Logout */}
       <div className="mt-2 border-t" style={{ borderColor: "var(--glass-border)" }}>
         <button
           type="button"

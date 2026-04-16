@@ -9,43 +9,58 @@ import time
 from datetime import datetime
 from typing import Any
 
+from enterprise.agent.framework.base_agent import BaseAgent
+from enterprise.agent.framework.message import AgentMessage, AgentResponse
+
 from .schemas import ExecutionResult, SubTask, SubTaskStatus
 
 logger = logging.getLogger(__name__)
 
 
-class ExecutorAgent:
-    """Executes sub-tasks from PlannerAgent plans.
+class ExecutorAgent(BaseAgent):
+    """Executes sub-tasks from PlannerAgent plans."""
 
-    Each sub-task is run via a configurable action handler (which in production
-    wraps Skyvern's perception-action loop). Results are reported back
-    to the coordinator for state tracking and potential replanning.
-    """
+    agent_name = "executor"
+    agent_description = "Executes subtasks and reports structured browser-action results"
+    capabilities = ["execute_subtask"]
 
     def __init__(self, action_handler=None):
-        """
-        Args:
-            action_handler: async function(goal: str, context: dict) -> dict
-                            that performs the actual browser interaction.
-                            Returns {"success": bool, "data": dict, "error": str | None,
-                                     "screenshot_key": str | None, "page_url": str | None}
-        """
+        super().__init__(model_tier="none")
         self.action_handler = action_handler
+
+    async def handle_message(self, message: AgentMessage) -> AgentResponse:
+        try:
+            subtask_payload = message.payload.get("subtask")
+            if subtask_payload:
+                subtask = SubTask.model_validate(subtask_payload)
+            else:
+                subtask = SubTask(
+                    index=int(message.payload.get("index", 0)),
+                    goal=str(message.payload.get("subtask_goal") or message.payload.get("goal") or "Execute task"),
+                    completion_condition=str(message.payload.get("completion_condition") or "Task completed"),
+                    max_retries=int(message.payload.get("max_retries", 2)),
+                )
+            result = await self.execute_subtask(subtask, message.context)
+            return AgentResponse(
+                message_id=message.message_id,
+                agent_name=self.agent_name,
+                success=result.success,
+                result={"execution_result": result.model_dump(), "execution_result_model": result},
+                error=result.error_message,
+            )
+        except Exception as exc:
+            return AgentResponse(
+                message_id=message.message_id,
+                agent_name=self.agent_name,
+                success=False,
+                error=str(exc),
+            )
 
     async def execute_subtask(
         self,
         subtask: SubTask,
         context: dict[str, Any] | None = None,
     ) -> ExecutionResult:
-        """Execute a single sub-task with retry logic.
-
-        Args:
-            subtask: The sub-task to execute.
-            context: Execution context (browser page, session data, etc.).
-
-        Returns:
-            ExecutionResult with success status and details.
-        """
         subtask.status = SubTaskStatus.RUNNING
         subtask.started_at = datetime.utcnow()
 
@@ -87,11 +102,11 @@ class ExecutorAgent:
                     subtask.subtask_id, attempt + 1, last_error,
                 )
 
-            except Exception as e:
-                last_error = str(e)
+            except Exception as exc:
+                last_error = str(exc)
                 logger.warning(
                     "ExecutorAgent: subtask %s attempt %d exception: %s",
-                    subtask.subtask_id, attempt + 1, e,
+                    subtask.subtask_id, attempt + 1, exc,
                 )
 
             if attempt < subtask.max_retries:
@@ -100,7 +115,6 @@ class ExecutorAgent:
                     subtask.subtask_id, attempt + 2, subtask.max_retries + 1,
                 )
 
-        # All retries exhausted
         elapsed = int((time.monotonic() - start) * 1000)
         subtask.status = SubTaskStatus.FAILED
         subtask.completed_at = datetime.utcnow()
@@ -118,10 +132,6 @@ class ExecutorAgent:
         )
 
     def _simulate_execution(self, subtask: SubTask) -> dict:
-        """Fallback simulation when no action_handler is provided.
-
-        Used in testing and development.
-        """
         return {
             "success": True,
             "data": {"goal": subtask.goal, "simulated": True},

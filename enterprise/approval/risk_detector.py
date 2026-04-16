@@ -5,8 +5,13 @@ Stage 2: LLM-based contextual analysis (only if Stage 1 hits).
 Fallback: If LLM fails and Stage 1 hit, conservatively return 'high'.
 """
 
-import structlog
+from __future__ import annotations
+
 from dataclasses import dataclass, field
+
+import structlog
+
+from enterprise.rag.rag_chain import RAGChain
 
 from .risk_keywords import (
     ALL_KEYWORDS,
@@ -23,21 +28,17 @@ LOG = structlog.get_logger()
 class RiskAssessment:
     """Result of risk detection on an operation."""
 
-    risk_level: str  # "low", "medium", "high", "critical"
+    risk_level: str
     reason: str
     matched_keywords: list[str] = field(default_factory=list)
-    stage: int = 1  # 1 = keyword only, 2 = LLM confirmed
-    llm_fallback: bool = False  # True if LLM failed and stage 1 result was used
+    stage: int = 1
+    llm_fallback: bool = False
 
 
 def _keyword_scan(
     text: str,
     industry: IndustryType | None = None,
 ) -> list[KeywordEntry]:
-    """Stage 1: Fast keyword matching against industry keyword libraries.
-
-    Returns all matched keyword entries sorted by risk level (critical first).
-    """
     keywords = INDUSTRY_KEYWORDS.get(industry, ALL_KEYWORDS) if industry else ALL_KEYWORDS
     text_lower = text.lower()
 
@@ -46,10 +47,8 @@ def _keyword_scan(
         if kw.keyword.lower() in text_lower:
             matched.append(kw)
 
-    # Sort by risk severity: critical > high > medium
     risk_order = {"critical": 0, "high": 1, "medium": 2}
-    matched.sort(key=lambda k: risk_order.get(k.risk_level, 3))
-
+    matched.sort(key=lambda keyword: risk_order.get(keyword.risk_level, 3))
     return matched
 
 
@@ -58,28 +57,49 @@ async def _llm_risk_analysis(
     matched_keywords: list[KeywordEntry],
     page_context: str | None = None,
     llm_callable=None,
+    industry: IndustryType | None = None,
+    rag_chain: RAGChain | None = None,
 ) -> RiskAssessment | None:
-    """Stage 2: LLM-based contextual risk analysis.
-
-    Calls the provided LLM function to analyze the operation in context.
-    Returns None if LLM is unavailable or fails.
-    """
     if llm_callable is None:
         return None
 
-    prompt = (
-        "You are a financial compliance officer. Analyze the following operation "
-        "and determine its risk level (medium, high, or critical).\n\n"
-        f"Operation description: {text}\n"
-        f"Matched risk keywords: {', '.join(kw.keyword for kw in matched_keywords)}\n"
-    )
-    if page_context:
-        prompt += f"Page context: {page_context}\n"
+    rag_context = None
+    if rag_chain is not None:
+        try:
+            rag_context = await rag_chain.build_augmented_context(
+                query=text,
+                filter_metadata={"type": "compliance"},
+                max_context_tokens=1500,
+            )
+        except Exception as exc:
+            LOG.warning("RAG risk context lookup failed", error=str(exc))
 
-    prompt += (
-        "\nRespond with exactly one JSON object:\n"
-        '{"risk_level": "medium|high|critical", "reason": "brief explanation"}\n'
-    )
+    prompt = f"""You are a senior financial compliance officer with expertise in {industry or 'financial'} operations.
+
+## Analysis Framework
+Analyze this operation step by step:
+1. Operation Type: what financial action is being performed?
+2. Risk Indicators: which matched keywords indicate real risk vs false positives?
+3. Amount Assessment: does the operation involve monetary amounts and how large are they?
+4. Regulatory Impact: could this violate AML, KYC, approval, or reporting requirements?
+5. Reversibility: is the operation easy to reverse if it goes wrong?
+6. Final Judgment: provide the overall risk level.
+
+## Risk Level Definitions
+- medium: operation involves sensitive data or moderate amounts, standard review is sufficient
+- high: operation could cause significant financial loss or regulatory issues, department approval required
+- critical: operation involves very large amounts, cross-border transactions, or material compliance exposure
+
+## Operation Details
+- Description: {text}
+- Matched risk keywords: {', '.join(kw.keyword for kw in matched_keywords)}
+- Keyword categories: {', '.join(sorted({kw.category for kw in matched_keywords}))}
+{f'- Page context: {page_context}' if page_context else ''}
+{f'## Reference regulations\n{rag_context.augmented_text}' if rag_context and rag_context.augmented_text else ''}
+
+Respond with a JSON object:
+{{"reasoning": "brief step-by-step analysis", "risk_level": "medium|high|critical", "reason": "one-sentence summary"}}
+"""
 
     try:
         result = await llm_callable(prompt)
@@ -93,8 +113,8 @@ async def _llm_risk_analysis(
                     matched_keywords=[kw.keyword for kw in matched_keywords],
                     stage=2,
                 )
-    except Exception as e:
-        LOG.warning("LLM risk analysis failed", error=str(e))
+    except Exception as exc:
+        LOG.warning("LLM risk analysis failed", error=str(exc))
 
     return None
 
@@ -104,23 +124,11 @@ async def detect_risk(
     industry: IndustryType | None = None,
     page_context: str | None = None,
     llm_callable=None,
+    rag_chain: RAGChain | None = None,
 ) -> RiskAssessment:
-    """Run two-stage risk detection on an operation description.
-
-    Args:
-        text: The operation description or action text to analyze.
-        industry: Optional industry type for targeted keyword matching.
-        page_context: Optional page HTML/text context for LLM analysis.
-        llm_callable: Optional async function(prompt: str) -> dict for LLM.
-
-    Returns:
-        RiskAssessment with the determined risk level and reasoning.
-    """
-    # Stage 1: Keyword + regex scan
     matched = _keyword_scan(text, industry)
 
     if not matched:
-        # Check for high amounts even without keyword match
         if has_high_amount(text):
             return RiskAssessment(
                 risk_level="medium",
@@ -134,11 +142,9 @@ async def detect_risk(
             stage=1,
         )
 
-    # Determine Stage 1 risk level (highest among matched keywords)
-    stage1_level = matched[0].risk_level  # Already sorted, first is highest
+    stage1_level = matched[0].risk_level
     stage1_keywords = [kw.keyword for kw in matched]
 
-    # Escalate if high amounts detected alongside keywords
     if has_high_amount(text) and stage1_level == "high":
         stage1_level = "critical"
 
@@ -149,9 +155,13 @@ async def detect_risk(
         text_preview=text[:100],
     )
 
-    # Stage 2: LLM analysis (only if Stage 1 hit)
     llm_result = await _llm_risk_analysis(
-        text, matched, page_context, llm_callable
+        text=text,
+        matched_keywords=matched,
+        page_context=page_context,
+        llm_callable=llm_callable,
+        industry=industry,
+        rag_chain=rag_chain,
     )
 
     if llm_result:
@@ -162,7 +172,6 @@ async def detect_risk(
         )
         return llm_result
 
-    # LLM unavailable or failed — conservative fallback
     if llm_callable is not None:
         LOG.warning(
             "LLM risk analysis failed, using conservative fallback",
@@ -177,7 +186,6 @@ async def detect_risk(
             llm_fallback=True,
         )
 
-    # No LLM configured — return Stage 1 result directly
     return RiskAssessment(
         risk_level=stage1_level,
         reason=f"Keyword match: {', '.join(stage1_keywords[:3])}",
